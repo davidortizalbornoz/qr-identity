@@ -1,64 +1,38 @@
 import {
   Controller,
-  Get,
   Post,
   Body,
-  UploadedFile,
-  UseInterceptors,
   BadRequestException,
+  InternalServerErrorException,
+  HttpException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { AppService } from './app.service';
-import { GenerateRequestDto } from './dto/generate-request.dto';
+import { GenerateRequestDto } from './dto/register-post-request.dto';
+import { ResponsePostDto } from './dto/register-post-response.dto';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService
+  ) {}
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
-
-  @Post('generate')
-  @UseInterceptors(FileInterceptor('image'))
-  async generateQR(
-    @Body() data: GenerateRequestDto,
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
+  @Post('register')
+  async register(@Body() body: GenerateRequestDto): Promise<ResponsePostDto> {
     try {
-      return await this.appService.generateQR(data, file);
+      return await this.appService.register(body);
     } catch (error) {
-      throw new BadRequestException(error.message);
-    }
-  }
-
-  @Post('generate-base64')
-  async generateQRWithBase64(
-    @Body() body: {
-      data: GenerateRequestDto;
-      base64Image: string;
-      fileName: string;
-      mimeType: string;
-    },
-  ) {
-    try {
-      const { data, base64Image, fileName, mimeType } = body;
-      
-      if (!base64Image || !fileName || !mimeType) {
-        throw new BadRequestException(
-          'Se requieren base64Image, fileName y mimeType',
-        );
+      // Si el error ya es una HttpException, la propagamos tal como está
+      if (error instanceof HttpException) {
+        throw error;
       }
-
-      return await this.appService.generateQRWithBase64Image(
-        data,
-        base64Image,
-        fileName,
-        mimeType,
-      );
-    } catch (error) {
-      throw new BadRequestException(error.message);
+      
+      // Para errores de validación o datos incorrectos
+      if (error.message?.includes('validation') || error.message?.includes('invalid')) {
+        throw new BadRequestException(error.message || 'Datos de entrada inválidos');
+      }
+      
+      // Para errores internos del servidor (base de datos, servicios externos, etc.)
+      throw new InternalServerErrorException('Error interno del servidor');
     }
   }
 }

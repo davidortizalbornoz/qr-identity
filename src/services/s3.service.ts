@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import {
   S3Client,
@@ -12,6 +13,13 @@ export class S3Service {
   private readonly logger = new Logger(S3Service.name);
 
   constructor() {
+    this.logger.log('Inicializando S3Service con configuración:', {
+      region: awsS3Config.region,
+      bucketName: awsS3Config.bucketName,
+      hasAccessKey: !!awsS3Config.accessKeyId,
+      hasSecretKey: !!awsS3Config.secretAccessKey,
+    });
+
     this.s3Client = new S3Client({
       region: awsS3Config.region,
       credentials: {
@@ -46,8 +54,11 @@ export class S3Service {
       );
     }
 
-    if (!base64String.match(/^data:image\/(jpeg|png|gif|webp);base64,/)) {
-      throw new BadRequestException('Formato de imagen base64 inválido');
+    // Validación más flexible para el formato base64
+    const base64Regex = /^data:image\/(jpeg|png|gif|webp);base64,/i;
+    if (!base64Regex.test(base64String)) {
+      this.logger.error('Formato base64 inválido');
+      throw new BadRequestException('Formato de imagen base64 inválido. Debe ser: data:image/[tipo];base64,[datos]');
     }
 
     const base64Content = base64String.split(',')[1];
@@ -56,13 +67,15 @@ export class S3Service {
     }
 
     const sizeInBytes = Math.ceil((base64Content.length * 3) / 4);
+
     if (sizeInBytes > awsS3Config.uploadConfig.maxFileSize) {
       throw new BadRequestException(
         `La imagen excede el tamaño máximo permitido (${awsS3Config.uploadConfig.maxFileSize / 1024 / 1024}MB)`,
       );
     }
 
-    const imageType = base64String.match(/^data:(image\/[^;]+);base64,/)?.[1];
+    const imageType = base64String.match(/^data:(image\/[^;]+);base64,/i)?.[1];
+
     if (
       !imageType ||
       !awsS3Config.uploadConfig.allowedMimeTypes.includes(imageType)
@@ -92,22 +105,22 @@ export class S3Service {
 
   private generateS3Key(
     folderPath: string,
-    id: string,
+    nanoId: string,
     originalName: string,
   ): string {
-    const fileName = this.generateFileNameWithId(originalName, id);
-    return `${folderPath}${fileName}`;
+    const extension = originalName.split('.').pop();
+    return `${folderPath}${nanoId}/${nanoId}.${extension}`;
   }
 
   async uploadFile(
     file: Express.Multer.File,
-    id: string,
+    nanoId: string,
     vcardType?: string,
   ): Promise<string> {
     this.validateFile(file);
 
     const folderPath = this.getFolderPathByVcardType(vcardType);
-    const s3Key = this.generateS3Key(folderPath, id, file.originalname);
+    const s3Key = this.generateS3Key(folderPath, nanoId, file.originalname);
 
     const command = new PutObjectCommand({
       Bucket: awsS3Config.bucketName,
@@ -120,7 +133,7 @@ export class S3Service {
     try {
       await this.s3Client.send(command);
       const fileUrl = `https://${awsS3Config.bucketName}.s3.${awsS3Config.region}.amazonaws.com/${s3Key}`;
-      this.logger.log(`Archivo subido exitosamente: ${fileUrl}`);
+      this.logger.log(`Archivo subido a S3: ${fileUrl}`);
       return fileUrl;
     } catch (error) {
       this.logger.error('Error al subir archivo a S3:', error);
@@ -132,33 +145,52 @@ export class S3Service {
     base64String: string,
     fileName: string,
     mimeType: string,
-    id: string,
+    nanoId: string,
     vcardType?: string,
   ): Promise<string> {
-    this.validateBase64Image(base64String, mimeType);
-
-    const base64Content = base64String.split(',')[1];
-    const buffer = Buffer.from(base64Content, 'base64');
-
-    const folderPath = this.getFolderPathByVcardType(vcardType);
-    const s3Key = this.generateS3Key(folderPath, id, fileName);
-
-    const command = new PutObjectCommand({
-      Bucket: awsS3Config.bucketName,
-      Key: s3Key,
-      Body: buffer,
-      ContentType: mimeType,
-      ACL: 'public-read',
-    });
-
     try {
+      this.validateBase64Image(base64String, mimeType);
+
+      const base64Content = base64String.split(',')[1];
+      const buffer = Buffer.from(base64Content, 'base64');
+
+      const folderPath = this.getFolderPathByVcardType(vcardType);
+      const s3Key = this.generateS3Key(folderPath, nanoId, fileName);
+
+      const command = new PutObjectCommand({
+        Bucket: awsS3Config.bucketName,
+        Key: s3Key,
+        Body: buffer,
+        ContentType: mimeType,
+        ACL: 'public-read',
+      });
+
       await this.s3Client.send(command);
+      
       const fileUrl = `https://${awsS3Config.bucketName}.s3.${awsS3Config.region}.amazonaws.com/${s3Key}`;
-      this.logger.log(`Imagen base64 subida exitosamente: ${fileUrl}`);
+      this.logger.log(`Imagen subida a S3: ${fileUrl}`);
       return fileUrl;
     } catch (error) {
-      this.logger.error('Error al subir imagen base64 a S3:', error);
-      throw new BadRequestException('Error al subir imagen a S3');
+      this.logger.error('Error al subir imagen a S3:', {
+        error: error.message,
+        fileName,
+        nanoId,
+        vcardType,
+      });
+      
+      if (error.name === 'AccessDenied') {
+        throw new BadRequestException('Acceso denegado a S3. Verificar credenciales y permisos.');
+      }
+      
+      if (error.name === 'NoSuchBucket') {
+        throw new BadRequestException('Bucket S3 no encontrado. Verificar configuración.');
+      }
+      
+      if (error.name === 'InvalidAccessKeyId') {
+        throw new BadRequestException('Clave de acceso AWS inválida.');
+      }
+      
+      throw new BadRequestException(`Error al subir imagen a S3: ${error.message}`);
     }
   }
 
@@ -177,7 +209,7 @@ export class S3Service {
       });
 
       await this.s3Client.send(command);
-      this.logger.log(`Archivo eliminado exitosamente: ${fileUrl}`);
+      this.logger.log(`Archivo eliminado de S3: ${fileUrl}`);
     } catch (error) {
       this.logger.error('Error al eliminar archivo de S3:', error);
       throw new BadRequestException('Error al eliminar archivo de S3');
