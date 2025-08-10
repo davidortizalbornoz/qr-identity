@@ -50,3 +50,17 @@ lerna-debug.log*
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Angular specific
+/out-tsc/
+/tmp/
+/e2e/test-output/
+/.angular/
+.angular/
+
+# Angular CLI and build artefacts
+/.angular-cli.json
+/.ng/
+
+# TypeScript cache
+*.tsbuildinfo
