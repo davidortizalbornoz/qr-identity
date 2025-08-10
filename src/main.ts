@@ -1,7 +1,18 @@
 /* eslint-disable no-undef */
+import * as dotenv from 'dotenv';
+
+// Cargar variables de entorno AL INICIO
+dotenv.config();
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { json, urlencoded } from 'express';
+
+// Verificar que las variables se cargaron correctamente
+console.log('🔍 Verificando variables de entorno en main.ts...');
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '✅ Configurado' : '❌ No configurado');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

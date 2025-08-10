@@ -1,14 +1,4 @@
 /* eslint-disable no-undef */
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-
-// Cargar configuración desde archivo properties
-const propertiesPath = path.join(
-  process.cwd(),
-  'config',
-  'aws-s3-config.properties',
-);
-dotenv.config({ path: propertiesPath });
 
 export const awsS3Config = {
   region: process.env.AWS_REGION || 'us-east-1',
