@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, NotFoundException, HttpException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Identity } from './entities/identity.entity';
@@ -142,6 +142,88 @@ export class AppService implements OnModuleInit {
       }
       
       throw new Error('Error al procesar la solicitud de registro');
+    }
+  }
+
+  async findByIdentity(nanoId: string): Promise<ResponsePostDto> {
+    try {
+      // Buscar la identidad por nano_id
+      const identity = await this.identityRepository.findOne({
+        where: { nano_id: nanoId }
+      });
+
+      if (!identity) {
+        throw new NotFoundException(`No se encontró identidad con nanoId: ${nanoId}`);
+      }
+
+      this.logger.log(`Identidad encontrada - ID: ${identity.id}, NanoId: ${nanoId}`);
+
+      // Extraer información de la imagen del picPath si existe
+      let imageName = null;
+      let imageType = null;
+      let imagePathS3 = identity.picPath;
+
+      if (identity.picPath) {
+        // Extraer el nombre del archivo de la URL de S3
+        const urlParts = identity.picPath.split('/');
+        const fileName = urlParts[urlParts.length - 1];
+        const fileNameParts = fileName.split('.');
+        
+        if (fileNameParts.length >= 2) {
+          imageName = fileName;
+          // Determinar el tipo de imagen basado en la extensión
+          const extension = fileNameParts[fileNameParts.length - 1].toLowerCase();
+          switch (extension) {
+            case 'jpg':
+            case 'jpeg':
+              imageType = 'image/jpeg';
+              break;
+            case 'png':
+              imageType = 'image/png';
+              break;
+            case 'gif':
+              imageType = 'image/gif';
+              break;
+            case 'webp':
+              imageType = 'image/webp';
+              break;
+            default:
+              imageType = 'image/jpeg'; // Por defecto
+          }
+        }
+      }
+
+      // Preparar la respuesta con el mismo formato que el POST
+      const response: ResponsePostDto = {
+        id: identity.id,
+        nanoId: identity.nano_id,
+        qrContent: identity.qr_content,
+        vcardType: identity.vcardType,
+        image: {
+          imageName: imageName,
+          imageType: imageType,
+          imagePathS3: imagePathS3,
+        },
+        data: identity.data,
+        created_at: `${identity.created_at.getFullYear()}-${String(identity.created_at.getMonth() + 1).padStart(2, '0')}-${String(identity.created_at.getDate()).padStart(2, '0')}T${String(identity.created_at.getHours()).padStart(2, '0')}:${String(identity.created_at.getMinutes()).padStart(2, '0')}:${String(identity.created_at.getSeconds()).padStart(2, '0')}.${String(identity.created_at.getMilliseconds()).padStart(3, '0')}Z`,
+      };
+
+      this.logger.log(`Consulta completada exitosamente - ID: ${identity.id}, NanoId: ${nanoId}`);
+      return response;
+    } catch (error) {
+      this.logger.error('Error al buscar identidad por nanoId', error);
+      
+      // Si ya es una HttpException, la propagamos
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      
+      // Para errores de base de datos
+      if (error.code === '23505') {
+        throw new Error('Error de duplicación en la base de datos');
+      }
+      
+      throw new Error('Error al buscar la identidad');
     }
   }
 }

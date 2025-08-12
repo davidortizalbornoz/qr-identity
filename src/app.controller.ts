@@ -1,10 +1,13 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
+  Param,
   BadRequestException,
   InternalServerErrorException,
   HttpException,
+  NotFoundException,
 } from '@nestjs/common';
 import { AppService } from './app.service';
 import { GenerateRequestDto } from './dto/register-post-request.dto';
@@ -20,6 +23,26 @@ export class AppController {
   async register(@Body() body: GenerateRequestDto): Promise<ResponsePostDto> {
     try {
       return await this.appService.register(body);
+    } catch (error) {
+      // Si el error ya es una HttpException, la propagamos tal como está
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      
+      // Para errores de validación o datos incorrectos
+      if (error.message?.includes('validation') || error.message?.includes('invalid')) {
+        throw new BadRequestException(error.message || 'Datos de entrada inválidos');
+      }
+      
+      // Para errores internos del servidor (base de datos, servicios externos, etc.)
+      throw new InternalServerErrorException('Error interno del servidor');
+    }
+  }
+
+  @Get(':nanoId')
+  async getByIdentity(@Param('nanoId') nanoId: string): Promise<ResponsePostDto> {
+    try {
+      return await this.appService.findByIdentity(nanoId);
     } catch (error) {
       // Si el error ya es una HttpException, la propagamos tal como está
       if (error instanceof HttpException) {
